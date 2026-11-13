@@ -46,6 +46,12 @@ Reply shape (bridge → agent, same session):
 {"from":"hermes","to":"muse","session":"test-001","type":"reply","body":"..."}
 ```
 
+## Session lifecycle (locked Nov 13)
+
+- Session id doubles as task id. First reply = ack, last reply = result.
+- Timeout never kills a session. Silence past timeout just means Hermes takes the job back / nudges — the session goes quiet, not dead.
+- Same id resumes same story: reusing a session id replays saved context from bridge logs. Required for memoryless minds (Codex/Cursor) — they wake up with full history, not blank.
+
 ## Validation order (bridge)
 
 1. Line >12000 chars → drop.
