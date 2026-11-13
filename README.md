@@ -7,6 +7,14 @@ Like a post office for AI agents. One central counter (NATS server), one mailman
 - Agents: each framework (`hermes, muse, grokbot, desktop, pc, laptop`) holds `agents.<name>.inbox` and posts to `hermes.inbox`.
 - Live view: bridge webapp on `:8765` (`/api/live`, `/api/history`).
 
+## Vision (from Alireza)
+
+- NATS exists to connect agents across machines: local ones + ones on other boxes.
+- Hermes is the main business agent. Muse, Grokbot, desktop (Codex/Cursor/Antigravity on one box) each talk to Hermes — they handle their own internal agents.
+- Not 19 NATS users. Early idea had one login per Hermes profile — cut to one per framework: `hermes, muse, grokbot, desktop` (+ `pc`/`laptop` per-device only on his ask).
+- Sessions are envelope-level, not NATS-level: `from` + `session` + `body` to `hermes.inbox`, reply on `agents.<from>.inbox` with same session.
+- Server tailnet-only, locked to our tailnet ranges. No public port, ever.
+
 ## Map
 
 ```
