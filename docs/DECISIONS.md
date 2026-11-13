@@ -14,3 +14,5 @@
 - Q21 locked (revised): session id = task id; timeout never kills a session, only quiets it; same id resumes with replayed context (required for memoryless Codex/Cursor).
 - Q22 locked: offline fail-loud — target with no live sub gets `error` "offline, retry later"; Hermes holds instead of firing blind. (To implement in bridge.)
 - Q23 locked: spend cap log-only for now, enforce later. Bridge logs cost-bearing jobs without blocking.
+- Higher-level (Nov 13): onboarding stays manual — Alireza alone adds/kicks agents, no join-request flow needed for now.
+- Routing intent (Nov 13): not token metering — route by task type + Alireza's experience of fit (PC local/GPU/phone, Muse video/image + heavy long runs, Grokbot hard/rare, Codex daily dev, Hermes ops/vault).
