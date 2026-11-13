@@ -11,9 +11,13 @@ Like a post office for AI agents. One central counter (NATS server), one mailman
 
 - NATS exists to connect agents across machines: local ones + ones on other boxes.
 - Hermes is the main business agent. Muse, Grokbot, desktop (Codex/Cursor/Antigravity on one box) each talk to Hermes — they handle their own internal agents.
-- Not 19 NATS users. Early idea had one login per Hermes profile — cut to one per framework: `hermes, muse, grokbot, desktop` (+ `pc`/`laptop` per-device only on his ask).
+- Not 19 NATS users. Early idea had one login per Hermes profile — cut to one per framework: `hermes, muse, grokbot, desktop` (+ `pc`/`laptop` per-device — Alireza explicitly asked for separate PC + laptop logins).
 - Sessions are envelope-level, not NATS-level: `from` + `session` + `body` to `hermes.inbox`, reply on `agents.<from>.inbox` with same session.
-- Server tailnet-only, locked to our tailnet ranges. No public port, ever.
+- Server tailnet-only, locked to our tailnet ranges. No public port, ever. Tailscale is mandatory — no tailnet, no ring.
+- Grill decision (Nov 12): end state is peer offload, not hub-only. Each node becomes a real agent waiting on NATS; roles differ — PC local/GPU/phone, Muse bulk video/image + expensive long runs, Grokbot rare high-impact + Cursor sessions, Codex daily interactive dev, Hermes vault + ops + authorizations. Direct peer messages allowed with Hermes CC'd, Hermes alone approves risky acts, revisit shape after 2 live weeks.
+- Edge rule: no Hermes on edge devices, ever. Edge holds no sensitive data, asks Hermes over NATS. Codex is the PC mind, swappable in one config line.
+- Muse must answer, not just ack. Every test proves with a real reply on NATS, same session.
+- History: core NATS forgets after delivery. Nui rejected (live-only). Own history from bridge logs → `history.html` → live+history webapp on `:8765`.
 
 ## Map
 
@@ -24,7 +28,7 @@ agent (agents.muse.inbox)
   --reply--> agents.muse.inbox (same session id)
 ```
 
-Agents never talk to each other directly. All mail goes through the bridge.
+Agents start hub-routed (all mail through bridge). Supervised-direct peer messages allowed with Hermes CC'd — revisit after 2 live weeks.
 
 ## Docs
 
