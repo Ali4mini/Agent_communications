@@ -16,3 +16,5 @@
 - Q23 locked: spend cap log-only for now, enforce later. Bridge logs cost-bearing jobs without blocking.
 - Higher-level (Nov 13): onboarding stays manual — Alireza alone adds/kicks agents, no join-request flow needed for now.
 - Routing intent (Nov 13): not token metering — route by task type + Alireza's experience of fit (PC local/GPU/phone, Muse video/image + heavy long runs, Grokbot hard/rare, Codex daily dev, Hermes ops/vault).
+- Heartbeat (Nov 13): `nats-heartbeat` cron every 10m — checks :4222, connz, bridge + webapp; shouts only on failure.
+- Secondary (due Nov 16): thin Hermes (memory synced, no full tools, weaker box OK) + secondary NATS/bridge. Reminder set.
