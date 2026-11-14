@@ -20,3 +20,4 @@
 - Secondary (due Nov 16): thin Hermes (memory synced, no full tools, weaker box OK) + secondary NATS/bridge. Reminder set.
 - Log hygiene (Nov 14): keep full logs forever — no scrub, no expiry. Alireza's call; secrets stay in bridge session logs.
 - Offline holding (Nov 14): Hermes holds offline-bound jobs 24h, retries on reappear; past 24h replies failed to sender.
+- Big artifacts (Nov 14): pointer only — path/URL + hash in envelope, receiver fetches; never inline bytes.
