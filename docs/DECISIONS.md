@@ -22,3 +22,4 @@
 - Offline holding (Nov 14): Hermes holds offline-bound jobs 24h, retries on reappear; past 24h replies failed to sender.
 - Big artifacts (Nov 14): pointer only — path/URL + hash in envelope, receiver fetches; never inline bytes.
 - Identity (Nov 14): bridge enforces login-name == from field; mismatch gets error, no run.
+- Presence (Nov 14): every agent posts heartbeat — alive, busy/free, capabilities. Hermes assigns only to live + free + capable.
