@@ -23,3 +23,7 @@
 - Big artifacts (Nov 14): pointer only — path/URL + hash in envelope, receiver fetches; never inline bytes.
 - Identity (Nov 14): bridge enforces login-name == from field; mismatch gets error, no run.
 - Presence (Nov 14): every agent posts heartbeat — alive, busy/free, capabilities. Hermes assigns only to live + free + capable.
+- Pivot (Nov 15): porch-only. NATS stays dark; TLS porch `:9443` is the only public entry; Tailnet no longer required.
+- Porch live (Nov 15): HTTPS relay, sender-identity, 130s reply wait, rate-limited, pinned cert. Proven with grokbot round-trip.
+- Grokbot live (Nov 15): `grok-porch1`, GROK_PORCH_OK, cert pinned + client-side pinning. First external agent on the mesh.
+- Reply trim (Nov 15): bridge strips Hermes CLI chrome (banner, Query echo, resume block, session footer) — replies arrive clean.

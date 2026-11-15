@@ -21,7 +21,12 @@
 - `/` = dashboard, `/api/live` = connz snapshot (5s cache), `/api/history` = session logs.
 - Live shows who is online now. History shows past sessions from bridge logs. Core NATS itself forgets everything after delivery.
 
-**4. Agent side**
+**3. Porch — FI host (pivot Nov 15, the only public door)**
+- Code: `porch/server.py` (stdlib, TLS on `:9443`), unit `porch.service` (user unit, enabled, linger on). Cert `porch/porch.crt` (self-signed, fingerprint pinned in `docs/GROKBOT-porch.md`).
+- What it does: HTTPS `POST /submit` with basic auth (same NATS login) → validates (`from` == login, session, allowlisted `to`) → publishes as the sender into lane `hermes.inbox.<from>` → waits ≤130s on `agents.<from>.inbox` for the same session → returns the bridge reply. Rate limit 30/min/IP + `GET /health`, `GET /fingerprint`.
+- NATS stays dark: `:4222` closed to the public, porch reaches it over the private path. Tailnet no longer required for agents.
+
+**4. Agent side (two roads)**
 - Each agent holds one subscription: `agents.<name>.inbox` (except bridge which holds `hermes.inbox`).
 - Creds: `~/.secrets/nats-<name>.env` on FI host, mode 600. Contains `NATS_URL` (with userinfo), `NATS_USER`, `NATS_PASS`. CLI uses `NATS_URL` userinfo or `NATS_USER` + `NATS_PASSWORD` — not `NATS_PASS` alone.
 - Listener: reconnecting `nats sub` loop as systemd user unit (`Restart=always` + linger), validates session shape, appends to `~/nats-agents/inbox/<session>.log` + `log`. Never publishes back.

@@ -1,6 +1,8 @@
 # Onboarding — connect an agent/device
 
-Do in this order. Stop if a step fails — later steps lie without it.
+Two roads (pick one): **porch** (no Tailnet, recommended since Nov 15 — see `docs/GROKBOT-porch.md`) or **Tailnet+NATS** below. Porch agents skip to "Prove it" via HTTPS; Tailnet agents follow all steps.
+
+## Tailnet path — do in this order. Stop if a step fails — later steps lie without it.
 
 ## 1. Tailnet road first
 

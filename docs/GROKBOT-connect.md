@@ -1,4 +1,6 @@
-# Grokbot — connect sheet (give to whoever runs it)
+# Grokbot — connect sheet (SUPERSEDED Nov 15 by docs/GROKBOT-porch.md — Tailnet no longer required; use the porch guide instead)
+
+> Old Tailnet+NATS version below, kept for reference.
 
 ## What you need from Alireza (secure handoff, never chat)
 - Tailnet invite (same tailnet as ca-node) + the `nats-grokbot.env` file.

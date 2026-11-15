@@ -25,6 +25,12 @@ curl -s http://127.0.0.1:8765/api/live | jq .
 - Replies strip ANSI, box-drawing, blank chrome, cap 4000 chars. Both directions append to same `inbox/<session>.log` — history view reads these files. Full logs kept forever (Q24) — secrets stay in session logs by Alireza's call.
 - Phase 1: offline fail-loud — reply target with no live sub is held + noted (`hold/`), sender gets error on next run; holds expire after 24h (Q25). Presence via `agents.*.heartbeat` (alive/busy/caps, Q28) in `presence/`. Spend guess logged per message (`cost=yes/no`, log-only Q23). Session replay: same id resumes with prior context for memoryless minds (Q21).
 
+## Porch ops (pivot Nov 15)
+
+- Unit: `porch.service` (user unit, enabled, linger on). Restart: `systemctl --user restart porch.service`. Health: `curl -k https://127.0.0.1:9443/health` (bypass the FI proxy env for localhost).
+- Cert: self-signed `porch/porch.crt` + `porch.key` (key NEVER in git). Fingerprint pinned in `docs/GROKBOT-porch.md` + `GET /fingerprint`. Rotate = regen + repin everywhere.
+- Auth = NATS logins; lane == `from` enforced; 30/min/IP then 429. UFW: `9443/tcp` open. NATS `:4222` stays closed.
+
 ## Add / rotate / revoke logins
 
 - One login per framework. Generate with `openssl rand`, alphanumeric.
