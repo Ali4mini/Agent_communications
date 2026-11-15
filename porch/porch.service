@@ -1,0 +1,14 @@
+[Unit]
+Description=Porch: public TLS door for NATS agents (pivot Nov 15)
+After=network-online.target nats-bridge.service
+Wants=network-online.target
+
+[Service]
+Environment="PATH=/home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PORCH_PORT=9443"
+ExecStart=/usr/bin/python3 /home/dev/agent-communications/porch/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
