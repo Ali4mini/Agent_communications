@@ -51,6 +51,9 @@ Reply shape (bridge → agent, same session):
 - Session id doubles as task id. First reply = ack, last reply = result.
 - Timeout never kills a session. Silence past timeout just means Hermes takes the job back / nudges — the session goes quiet, not dead.
 - Same id resumes same story: reusing a session id replays saved context from bridge logs. Required for memoryless minds (Codex/Cursor) — they wake up with full history, not blank.
+- Big artifacts ride by pointer only (Q26): path/URL + hash in `body`, receiver fetches. Never inline bytes — envelope stays small.
+- Presence (Q28): agents post `agents.<name>.heartbeat` (alive, busy/free, capabilities). Hermes assigns only to live + free + capable.
+- Identity (Phase 2, Q27): bridge will enforce login-name == `from`. Until fences land, `from` is trust-based.
 
 ## Validation order (bridge)
 

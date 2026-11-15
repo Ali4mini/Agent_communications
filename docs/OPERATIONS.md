@@ -22,7 +22,8 @@ curl -s http://127.0.0.1:8765/api/live | jq .
 - Edit `bridge.sh` → must `systemctl restart nats-bridge.service` (system unit, needs privilege). Patched file does nothing until restart — check start time before claiming it live.
 - `PROFILES` allowlist in `bridge.sh` gates `to`. `from` is free-form. New framework login needs no bridge change unless it needs its own `to` profile.
 - Every inbound message spends a real agent run (~30–110s). Validate + size-cap before running; 100s timeout per run.
-- Replies strip ANSI, box-drawing, blank chrome, cap 4000 chars. Both directions append to same `inbox/<session>.log` — history view reads these files.
+- Replies strip ANSI, box-drawing, blank chrome, cap 4000 chars. Both directions append to same `inbox/<session>.log` — history view reads these files. Full logs kept forever (Q24) — secrets stay in session logs by Alireza's call.
+- Phase 1: offline fail-loud — reply target with no live sub is held + noted (`hold/`), sender gets error on next run; holds expire after 24h (Q25). Presence via `agents.*.heartbeat` (alive/busy/caps, Q28) in `presence/`. Spend guess logged per message (`cost=yes/no`, log-only Q23). Session replay: same id resumes with prior context for memoryless minds (Q21).
 
 ## Add / rotate / revoke logins
 
