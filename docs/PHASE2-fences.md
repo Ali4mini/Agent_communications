@@ -33,7 +33,12 @@ authorization {
 }
 ```
 
-## Rollout (needs Alireza yes)
+## Rollout (APPLIED Nov 15 — legacy kept open)
+
+- [x] Permissions live on ca-node (backup `nats.conf.bak-20261115`). Proven: own lane OK, cross-lane publish denied, cross-inbox sub denied, legacy `hermes.inbox` still accepted.
+- [ ] Agents move publish subject to `hermes.inbox.<name>` (muse .70 needs Alireza repair first).
+- [ ] Bridge lane loop live (identity mismatch = error, no run).
+- [ ] Legacy `hermes.inbox` kept 2 weeks, then fenced.
 
 1. Add permissions, `systemctl reload nats` (no drop).
 2. Agents move publish subject to `hermes.inbox.<name>`.
