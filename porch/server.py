@@ -148,7 +148,10 @@ class H(BaseHTTPRequestHandler):
         deadline = time.time() + REPLY_TIMEOUT
         while time.time() < deadline:
             left = max(1, int(deadline - time.time()))
-            r = run_nats(["sub", "--count=1", "agents.%s.inbox" % frm], url=uurl, timeout=min(left, 60) + 5)
+            try:
+                r = run_nats(["sub", "--count=1", "agents.%s.inbox" % frm], url=uurl, timeout=min(left, 60) + 5)
+            except Exception:
+                continue
             for line in (r.stdout or "").splitlines():
                 line = line.strip()
                 if not line.startswith("{"):
