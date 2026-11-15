@@ -136,14 +136,20 @@ presence_loop() {
   done
 }
 
-handle() { # $1=raw line
-  local line="$1" from session to body cost ctx
+handle() { # $1=raw line [$2=lane or empty for legacy]
+  local line="$1" lane="${2:-}" from session to body cost ctx
   [ ${#line} -gt 12000 ] && return 0
   from=$(echo "$line" | jq -r '.from // empty' 2>/dev/null)
   session=$(echo "$line" | jq -r '.session // empty' 2>/dev/null)
   to=$(echo "$line" | jq -r '.to // "hermes"' 2>/dev/null)
   body=$(echo "$line" | jq -r '.body // empty' 2>/dev/null)
   valid_name "$from" || return 0
+  # Phase 2a: lane (subject) is truth where known. Mismatch = error, no run.
+  if [ -n "$lane" ] && [ "$from" != "$lane" ]; then
+    reply "$from" "$session" "error" "identity mismatch: lane $lane != from $from"
+    echo "$(date -u +%FT%TZ) identity-mismatch lane=$lane from=$from session=$session" >>"$INBOX/log"
+    return 0
+  fi
   valid_session "$session" || return 0
   [ -n "$body" ] || return 0
   valid_name "$to" || { reply "$from" "$session" "error" "unknown recipient"; return 0; }
@@ -171,6 +177,29 @@ handle() { # $1=raw line
 }
 
 presence_loop &
+
+lane_loop() {
+  # Backwards-compatible: legacy hermes.inbox keeps working until agents move.
+  # Lane subject hermes.inbox.<name> carries the true sender.
+  while true; do
+    subj=""; line=""
+    nats --server "$NATS_URL" sub "hermes.inbox.*" 2>/dev/null | while IFS= read -r raw; do
+      case "$raw" in
+        *' Received on '*) subj=${raw##* Received on }; subj=${subj%%[[:space:]]*}; line=""; continue;;
+        '['*'#'*']'*) continue;;
+        '') continue;;
+        *) line="$raw";;
+      esac
+      [ -n "$line" ] || continue
+      lane=${subj##*.}
+      valid_name "$lane" || { line=""; continue; }
+      handle "$line" "$lane"
+      line=""
+    done
+    sleep 5
+  done
+}
+lane_loop &
 while true; do
   nats --server "$NATS_URL" sub --raw "hermes.inbox" 2>/dev/null | while IFS= read -r line; do
     [ -n "$line" ] && handle "$line"
