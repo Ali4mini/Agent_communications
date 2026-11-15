@@ -10,12 +10,9 @@ mkdir -p "$INBOX" "$QUEUE"
 set -a; source "$CREDS"; set +a
 export NATS_PASSWORD="${NATS_PASSWORD:-$NATS_PASS}"
 
-# TODO(lock with Alireza): how to list active Codex sessions + their folders.
-# Candidate: `codex status` / sessions dir / lock files per repo.
+# Locked (Nov 15): ask Codex itself before each job.
 codex_active_folders() {
-  # Placeholder: prints one repo path per line for live Codex sessions.
-  # Replace with real detector before going live.
-  echo ""
+  codex status --folders 2>/dev/null || codex status 2>/dev/null
 }
 
 is_clash() { # $1=body
