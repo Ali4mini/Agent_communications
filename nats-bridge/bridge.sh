@@ -192,7 +192,7 @@ lane_loop() {
       esac
       [ -n "$line" ] || continue
       lane=${subj##*.}
-      lane=${lane//[\"'\'']/}
+      lane=$(printf '%s' "$lane" | tr -d "\"'")
       valid_name "$lane" || { line=""; continue; }
       handle "$line" "$lane"
       line=""
