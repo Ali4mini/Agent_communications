@@ -6,6 +6,13 @@
 # presence tracking, spend log line. Identity fences (login==from) need
 # Phase 2 server permissions.
 #
+# Nov 15 (Alireza-approved): porch-served sleepers (PORCH_AGENTS) get a
+# durable porch spooler on their inbox, so they read as always-online and
+# rarely take the hold path. When a reply truly goes out to a target with
+# no live sub, the reply envelope itself is held (*.reply.json) and
+# re-published on reappear: live sub, or for porch agents a fresh
+# heartbeat (presence file) or mailbox poll (porch .poll file).
+#
 # Envelope (single-line JSON):
 #   {"from":"muse","to":"hermes","session":"<id>","type":"message","body":"..."}
 set -u
@@ -19,12 +26,15 @@ mkdir -p "$INBOX" "$HOLD_DIR" "$PRESENCE_DIR"
 set -a; source "$CREDS"; set +a # export NATS_URL so reply subprocesses see it
 [ -n "${NATS_URL:-}" ] || { echo "nats-bridge: no NATS_URL"; exit 1; }
 
-PROFILES="agents_manager binux_mgmt career config_selling_bot confiigchi_content divar finance infra_ops iran_reach_probe komak_moshaver meshcat_erp mysteryplay_new seo shopping speed_service talacrm vpn_bot vpn_outreach vpnspeed_content"
+PROFILES="agents_manager agent_communications binux_mgmt career config_selling_bot confiigchi_content divar finance infra_ops iran_reach_probe komak_moshaver meshcat_erp mysteryplay_new seo shopping speed_service talacrm vpn_bot vpn_outreach vpnspeed_content"
 CA_SSH="root@100.124.214.63"
 HOLD_SECS=86400 # 24h
+PORCH_AGENTS="grokbot" # porch-served sleepers: spooler holds their inbox sub
+PORCH_MAILBOX_DIR="${PORCH_MAILBOX_DIR:-/home/dev/.porch-mailbox}"
+FRESH_SECS=1800 # heartbeat/poll freshness = reappeared (30m)
 
 reply() { # $1=from $2=session $3=type $4=body
-  FROM="$1" SESSION="$2" TYPE="$3" BODY="$4" INBOX="$INBOX" python3 <<'PYEOF'
+  FROM="$1" SESSION="$2" TYPE="$3" BODY="$4" INBOX="$INBOX" SAVE_REPLY="${SAVE_REPLY:-}" python3 <<'PYEOF'
 import json, re, subprocess, os
 body = os.environ["BODY"]
 body = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][0-9A-Z]|\r", "", body)  # strip ANSI
@@ -39,6 +49,14 @@ msg = json.dumps({"from": "hermes", "to": os.environ["FROM"],
 subj = "agents.%s.inbox" % os.environ["FROM"]
 subprocess.run(["nats", "--server", os.environ["NATS_URL"], "pub", subj, msg],
                check=False, capture_output=True)
+sr = os.environ.get("SAVE_REPLY", "")
+if sr:
+    try:
+        with open(sr, "w") as sf:
+            sf.write(msg + "\n")
+        os.chmod(sr, 0o600)
+    except Exception:
+        pass
 try:
     with open(os.path.join(os.environ["INBOX"], os.environ["SESSION"] + ".log"), "a") as f:
         f.write(msg + "\n")
@@ -51,6 +69,8 @@ valid_name() { [[ "$1" =~ ^[a-z_][a-z0-9_]*$ ]]; }
 valid_session() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
 
 # True (0) if agents.<user>.inbox has a live subscriber right now.
+# Note: porch spoolers hold durable inbox subs for PORCH_AGENTS, so a
+# sleeping porch agent still reads as online — its mail lands in the spool.
 is_online() { # $1=user
   local user="$1" out
   out=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$CA_SSH" \
@@ -69,6 +89,29 @@ else:
   print('no')
 " 2>/dev/null)
   [ "$out" = "yes" ]
+}
+
+# True (0) if a porch-served sleeper shows fresh life: heartbeat seen in the
+# presence file or a mailbox poll/ack from the porch (both < FRESH_SECS).
+fresh_porch() { # $1=user
+  local user="$1" now f ts
+  now=$(date +%s)
+  for f in "$PRESENCE_DIR/$user" "$PORCH_MAILBOX_DIR/$user.poll"; do
+    [ -f "$f" ] || continue
+    ts=$(stat -c %Y "$f" 2>/dev/null) || continue
+    if [ $((now - ts)) -lt "$FRESH_SECS" ]; then return 0; fi
+  done
+  return 1
+}
+
+# True (0) if the target reappeared: live sub, or porch sleeper with fresh
+# heartbeat/poll. Held replies are re-published on reappear.
+reappeared() { # $1=user
+  is_online "$1" && return 0
+  case " $PORCH_AGENTS " in
+    *" $1 "*) fresh_porch "$1" ;;
+    *) return 1 ;;
+  esac
 }
 
 # Cost-bearing guess (log-only per Q23, never blocks).
@@ -104,24 +147,55 @@ hold_job() { # $1=to $2=session $3=envelope-line
   chmod 600 "$f"
 }
 
-# Sweep holds: retry online targets, expire past HOLD_SECS with failure note.
+# Sweep holds: re-publish held REPLIES on reappear, expire past HOLD_SECS.
+# *.reply.json holds the reply envelope itself (written when the target had
+# no live sub at send time): re-published to agents.<to>.inbox, where the
+# porch spooler captures it for sleeping porch agents.
+# Plain *.json holds the inbound job (pre-reply-hold era): logged + dropped
+# on reappear since its reply already went out (and vanished).
 sweep_holds() {
   local f base to session age now rest ts
   now=$(date +%s)
+  for f in "$HOLD_DIR"/*.reply.json; do
+    [ -e "$f" ] || break
+    base=$(basename "$f" .reply.json) # <to>.<session>.<ts>
+    to=${base%%.*}; rest=${base#*.}; session=${rest%.*}; ts=${rest##*.}
+    age=$((now - ts))
+    if [ "$age" -gt "$HOLD_SECS" ]; then
+      echo "$(date -u +%FT%TZ) hold-expired to=$to session=$session kind=reply" >>"$INBOX/log"
+      rm -f "$f"
+      continue
+    fi
+    if reappeared "$to"; then
+      if nats --server "$NATS_URL" pub "agents.$to.inbox" "$(cat "$f")" >/dev/null 2>&1; then
+        echo "$(date -u +%FT%TZ) hold-delivered to=$to session=$session" >>"$INBOX/log"
+        rm -f "$f"
+      fi
+    fi
+  done
   for f in "$HOLD_DIR"/*.json; do
     [ -e "$f" ] || break
+    case "$f" in *.reply.json) continue;; esac
     base=$(basename "$f" .json) # <to>.<session>.<ts>
     to=${base%%.*}; rest=${base#*.}; session=${rest%.*}; ts=${rest##*.}
     age=$((now - ts))
     if [ "$age" -gt "$HOLD_SECS" ]; then
-      echo "$(date -u +%FT%TZ) hold-expired to=$to session=$session" >>"$INBOX/log"
+      echo "$(date -u +%FT%TZ) hold-expired to=$to session=$session kind=inbound" >>"$INBOX/log"
       rm -f "$f"
       continue
     fi
-    if is_online "$to"; then
+    if reappeared "$to"; then
       echo "$(date -u +%FT%TZ) hold-retry to=$to session=$session" >>"$INBOX/log"
       rm -f "$f"
     fi
+  done
+}
+
+# Periodic sweep (the lane loop never sweeps, so run on a timer).
+sweep_loop() {
+  while true; do
+    sleep 60
+    sweep_holds
   done
 }
 
@@ -159,7 +233,10 @@ handle() { # $1=raw line [$2=lane or empty for legacy]
   echo "$(date -u +%FT%TZ) from=$from session=$session to=$to len=${#body} cost=$cost" >>"$INBOX/log"
   echo "$line" >>"$INBOX/$session.log"
   # Q22 fail-loud: if reply target has no live sub, hold + note it.
+  # Porch spoolers hold durable subs for PORCH_AGENTS, so sleepers rarely land here.
+  offline=0
   if ! is_online "$from"; then
+    offline=1
     hold_job "$from" "$session" "$line"
     echo "$(date -u +%FT%TZ) reply-target-offline from=$from session=$session held" >>"$INBOX/log"
   fi
@@ -175,10 +252,15 @@ handle() { # $1=raw line [$2=lane or empty for legacy]
     return 0
   fi
   [ -z "$out" ] && out="(empty reply, rc=$rc)"
+  if [ "$offline" = 1 ]; then
+    export SAVE_REPLY="$HOLD_DIR/$from.$session.$(date +%s).reply.json"
+  fi
   reply "$from" "$session" "reply" "$out"
+  unset SAVE_REPLY
 }
 
 presence_loop &
+sweep_loop &
 
 lane_loop() {
   # Backwards-compatible: legacy hermes.inbox keeps working until agents move.

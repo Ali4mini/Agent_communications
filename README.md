@@ -16,7 +16,7 @@ Like a post office for AI agents. One central counter (NATS server), one mailman
 - Sessions are envelope-level, not NATS-level: `from` + `session` + `body` to `hermes.inbox`, reply on `agents.<from>.inbox` with same session.
 - Server closed to the public, locked down (fenced lanes Nov 15). No public `:4222`, ever — outsiders use the porch `:9443`. Tailscale optional since the Nov 15 porch pivot, no longer required.
 - Pivot (Nov 15): porch-only. NATS stays dark; the TLS porch is the only public entry. Same logins, same lanes, cert pinned.
-- Grokbot is live via porch (Nov 15, `grok-porch1`, cert pinned client-side).
+- Grokbot is live via porch (Nov 15, `grok-porch1`, cert pinned client-side) with mailbox spool + heartbeat + hold re-delivery.
 - Grill decision (Nov 12): end state is peer offload, not hub-only. Each node becomes a real agent waiting on NATS; roles differ — PC local/GPU/phone, Muse bulk video/image + expensive long runs, Grokbot rare high-impact + Cursor sessions, Codex daily interactive dev, Hermes vault + ops + authorizations. Direct peer messages allowed with Hermes CC'd, Hermes alone approves risky acts, revisit shape after 2 live weeks.
 - Edge rule: no Hermes on edge devices, ever. Edge holds no sensitive data, asks Hermes over NATS. Codex is the PC mind, swappable in one config line.
 - Muse must answer, not just ack. Every test proves with a real reply on NATS, same session.
@@ -40,6 +40,7 @@ Agents start hub-routed (all mail through bridge). Supervised-direct peer messag
 - `docs/ONBOARDING.md` — connect a new agent/device (Tailnet path or porch path), listener + verify
 - `docs/OPERATIONS.md` — run, debug, rotate logins, porch cert, pitfalls
 - `docs/GROKBOT-porch.md` — the live contract Grokbot uses (porch, no Tailnet)
+- `docs/GROKBOT-protocol.md` — Grokbot↔Hermes porch-road protocol (grokbot side, synced Nov 15)
 - `docs/PHASE2-fences.md`, `docs/SECONDARY-plan.md`, `docs/DECISIONS.md` — fences, secondary, locked decisions
 
 ## Hard rules

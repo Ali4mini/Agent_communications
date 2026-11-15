@@ -51,7 +51,9 @@ Reply shape (bridge → agent, same session):
 - Session id doubles as task id. First reply = ack, last reply = result.
 - Timeout never kills a session. Silence past timeout just means Hermes takes the job back / nudges — the session goes quiet, not dead.
 - Same id resumes same story: reusing a session id replays saved context from bridge logs. Required for memoryless minds (Codex/Cursor) — they wake up with full history, not blank.
-- Big artifacts ride by pointer only (Q26): path/URL + hash in `body`, receiver fetches. Never inline bytes — envelope stays small.
+- Big artifacts ride by pointer only (Q26): path/URL + hash in `body`, receiver fetches. Never inline bytes — envelope stays small. Drop dir for grokbot both ways: `/home/dev/agent-drop/grokbot/` (dir 700, files 600; Hermes creates it).
+- Mailbox (porch road, Nov 15): porch spools `agents.<name>.inbox` per agent (24h expiry, Q25). Poll `GET /inbox?since=<cursor>` → `{"messages":[...],"cursor":"<next>"}`; ack with `POST /inbox/ack`. At-least-once — receivers dedup by (session, body hash).
+- Lifecycle markers (locked Nov 15, first body line, rest free-form): `TASK:` new work · `ACK:` accepted · `RESULT:` final · `APPROVAL-REQ: <what + spend/risk>` · `APPROVED: <by whom + scope>` · `DENIED: <reason>`.
 - Presence (Q28): agents post `agents.<name>.heartbeat` (alive, busy/free, capabilities). Hermes assigns only to live + free + capable.
 - Identity (Phase 2, Q27): bridge will enforce login-name == `from`. Until fences land, `from` is trust-based.
 
