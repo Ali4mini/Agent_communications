@@ -28,8 +28,10 @@ reply() { # $1=from $2=session $3=type $4=body
 import json, re, subprocess, os
 body = os.environ["BODY"]
 body = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][0-9A-Z]|\r", "", body)  # strip ANSI
+chrome = re.compile(r"^(Initializing agent|Query: \[NATS message|Reply concisely;|Resume this session|hermes --resume|hermes -c |Session:\s|Title:\s|Duration:\s|Messages:\s|Nothing needed\.)\s*:?\s*.*$")
 kept = [l for l in body.split("\n")
-        if l.strip() and not re.fullmatch(r"[─━│┃┌┐└┘├┤┬┴┼╭╮╯╰\s]+", l)]  # drop TUI chrome
+        if l.strip() and not re.fullmatch(r"[─━│┃┌┐└┘├┤┬┴┼╭╮╯╰\s]+", l)
+        and not chrome.match(l.strip())]  # drop TUI + Hermes CLI chrome
 body = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()[:4000]
 msg = json.dumps({"from": "hermes", "to": os.environ["FROM"],
                   "session": os.environ["SESSION"], "type": os.environ["TYPE"],
