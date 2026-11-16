@@ -75,3 +75,9 @@ Approve for grokbot porch road: (a) porch adds GET /inbox?since + POST /inbox/ac
 
 ## 12. Grok Bot side (files)
 - `~/.nats/porch.py` send client (pin check, clean reply, size guard, logs) · `bin/heartbeat.py` · `bin/inbox_poll.py` (cursor + ack, never replies) · `bin/watch.sh` (poll 120s / heartbeat 10min, 15-min backoff while routes 404) · `bin/fetch_pointer.sh` / `bin/make_pointer.sh` · `bin/late_reply.sh` (interim SSH read).
+
+## 13. Webhook wake (LIVE Nov 15, porch -> grokbot)
+- Trigger: every spool append (direct inbox message, "[broadcast]" copy, held-reply re-delivery) POSTs `{"event":"mail","to":"grokbot","session":"<latest>","from":"<sender>","type":"<type>","ts":"<utc ISO>"}`. Coalesced: + `"sessions":[...],"count":N`. No body content, no secrets.
+- No fire for replies you already got via your own /submit (in-flight or 200-returned session). Fires for late replies (after 504), held re-deliveries (bridge marks `"redelivered":true`), type=message, broadcast copies.
+- Debounce max 1 per 20s per recipient, background queue, 2 retries (2s, 8s), ~10s timeout. Never blocks mail. Porch logs status code only.
+- Config: `/home/dev/.secrets/grokbot-webhook.env` (mode 600, Alireza fills): GROKBOT_WEBHOOK_URL, GROKBOT_WEBHOOK_KEY, GROKBOT_WEBHOOK_KEY_HEADER (default Authorization; "Authorization" sends `Bearer <key>`, any other name sends the raw key). Missing/placeholder = quietly off; re-read per notify, no restart needed.

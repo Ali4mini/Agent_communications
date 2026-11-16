@@ -12,11 +12,17 @@ and spools envelopes to JSONL per agent (24h expiry, Q25). Sleepers poll
 GET /inbox?since=<cursor> + POST /inbox/ack. POST /heartbeat records
 presence (NATS publish where fences allow, else direct presence-file write
 so the bridge sees it either way).
+
+Webhook wake (Nov 15, Alireza-approved): every spool append fires a
+debounced HTTPS notify to the agent's webhook (config in
+/home/dev/.secrets/grokbot-webhook.env, re-read per notify; missing or
+placeholder values = quietly off). No body content, no secrets in notifies.
 Stdlib only. Secrets never logged."""
 import base64, hashlib, json, os, re, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 import ssl
+import urllib.request, urllib.error
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 NATS_URL = os.environ.get("NATS_URL", "")
@@ -29,6 +35,10 @@ BRIDGE_PRESENCE_DIR = os.environ.get(
     "BRIDGE_PRESENCE_DIR",
     "/home/dev/.hermes/profiles/agents_manager/nats-bridge/presence")
 HOLD_SECS = 86400  # 24h spool expiry (Q25)
+WEBHOOK_ENV_FILE = "/home/dev/.secrets/grokbot-webhook.env"
+WEBHOOK_DEBOUNCE = 20  # max 1 notify per 20s per recipient
+WEBHOOK_TIMEOUT = 10  # seconds per attempt
+WEBHOOK_RETRIES = (0, 2, 8)  # backoff sleeps before attempts 1..3
 
 VALID_NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
 VALID_SESSION = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -60,6 +70,14 @@ HITS = {}  # ip -> [timestamps] for rate limiting
 HITS_LOCK = threading.Lock()
 _SEQ = 0
 _SEQ_LOCK = threading.Lock()
+SUBMIT_ACTIVE = set()  # (from, session) with a /submit wait in flight
+SUBMIT_DONE = {}  # (from, session) -> ts of 200 reply already returned
+SUB_LOCK = threading.Lock()
+PENDING = {}  # agent -> [notify items] awaiting debounce window
+NOTIFY_LAST = {}  # agent -> ts of last notify attempt
+NOTIFY_LOCK = threading.Lock()
+NOTIFY_EV = threading.Event()
+_WEBHOOK_SKIP_LOGGED = False
 
 def rate_ok(ip):
     now = time.time()
@@ -89,6 +107,153 @@ def user_nats_url(user):
     from urllib.parse import quote
     return "nats://%s:%s@%s" % (user, quote(pw, safe=""), host)
 
+def submit_mark_active(frm, sess):
+    with SUB_LOCK:
+        SUBMIT_ACTIVE.add((frm, sess))
+
+def submit_mark_done(frm, sess):
+    now = time.time()
+    with SUB_LOCK:
+        SUBMIT_ACTIVE.discard((frm, sess))
+        SUBMIT_DONE[(frm, sess)] = now
+        for k, ts in list(SUBMIT_DONE.items()):
+            if now - ts > 3600:
+                SUBMIT_DONE.pop(k, None)
+
+def submit_mark_end(frm, sess):
+    with SUB_LOCK:
+        SUBMIT_ACTIVE.discard((frm, sess))
+
+# ---- webhook wake ----
+def _is_placeholder(v):
+    return (not v) or ("REPLACE" in v) or ("EXAMPLE" in v)
+
+def webhook_conf():
+    """Re-read per notify so filling the file later needs no restart."""
+    path = os.environ.get("GROKBOT_WEBHOOK_ENV_FILE", WEBHOOK_ENV_FILE)
+    conf = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip()
+                if k in ("GROKBOT_WEBHOOK_URL", "GROKBOT_WEBHOOK_KEY",
+                         "GROKBOT_WEBHOOK_KEY_HEADER"):
+                    conf[k] = v.strip().strip("'\"")
+    except OSError:
+        return {}
+    url, key = conf.get("GROKBOT_WEBHOOK_URL", ""), conf.get("GROKBOT_WEBHOOK_KEY", "")
+    if _is_placeholder(url) or _is_placeholder(key):
+        return {}
+    if url.startswith("http://"):
+        host = url.split("/")[2].split("@")[-1].split(":")[0].lower()
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            return {}  # real webhooks must be https
+    elif not url.startswith("https://"):
+        return {}
+    return conf
+
+def should_fire(agent, env):
+    """No notify for replies the agent already got via its own /submit."""
+    try:
+        if not isinstance(env, dict):
+            return False
+        if env.get("redelivered") is True:
+            return True  # held-reply re-delivery: always new mail
+        t = env.get("type", "")
+        if t == "message":
+            return True  # direct tasks + broadcast copies
+        if t in ("reply", "error"):
+            key = (env.get("to", agent), env.get("session", ""))
+            with SUB_LOCK:
+                if key in SUBMIT_ACTIVE:
+                    return False
+                ts = SUBMIT_DONE.get(key, 0)
+            if ts and time.time() - ts < 600:
+                return False
+            return True  # late reply after a 504 / no active wait
+        return True
+    except Exception:
+        return False
+
+def notify_enqueue(agent, env):
+    try:
+        if not should_fire(agent, env):
+            return
+        item = {"session": env.get("session", ""), "from": env.get("from", ""),
+                "type": env.get("type", "")}
+        with NOTIFY_LOCK:
+            PENDING.setdefault(agent, []).append(item)
+        NOTIFY_EV.set()
+    except Exception:
+        pass  # never break mail delivery
+
+def webhook_post(url, headers, payload):
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data,
+                                 headers={**headers, "Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=WEBHOOK_TIMEOUT) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return "error"
+
+def notifier():
+    global _WEBHOOK_SKIP_LOGGED
+    while True:
+        NOTIFY_EV.wait(timeout=5)
+        NOTIFY_EV.clear()
+        now = time.time()
+        with NOTIFY_LOCK:
+            due = {}
+            for agent, items in list(PENDING.items()):
+                if not items:
+                    PENDING.pop(agent, None)
+                    continue
+                if now - NOTIFY_LAST.get(agent, 0) >= WEBHOOK_DEBOUNCE:
+                    due[agent] = items
+                    PENDING[agent] = []
+        for agent, items in due.items():
+            uniq, seen = [], set()
+            for it in items:
+                if it["session"] not in seen:
+                    seen.add(it["session"])
+                    uniq.append(it)
+            latest = uniq[-1]
+            payload = {"event": "mail", "to": agent, "session": latest["session"],
+                       "from": latest["from"], "type": latest["type"],
+                       "ts": time.strftime("%FT%TZ", time.gmtime())}
+            if len(uniq) > 1:
+                payload["sessions"] = [u["session"] for u in uniq]
+                payload["count"] = len(uniq)
+            conf = webhook_conf()
+            if not conf:
+                if not _WEBHOOK_SKIP_LOGGED:
+                    print("webhook: not configured, notifications off", flush=True)
+                    _WEBHOOK_SKIP_LOGGED = True
+                NOTIFY_LAST[agent] = now
+                continue
+            _WEBHOOK_SKIP_LOGGED = False
+            hname = conf.get("GROKBOT_WEBHOOK_KEY_HEADER", "Authorization") or "Authorization"
+            key = conf["GROKBOT_WEBHOOK_KEY"]
+            hval = "Bearer " + key if hname.lower() == "authorization" else key
+            status = "error"
+            for backoff in WEBHOOK_RETRIES:
+                if backoff:
+                    time.sleep(backoff)
+                status = webhook_post(conf["GROKBOT_WEBHOOK_URL"], {hname: hval}, payload)
+                if isinstance(status, int) and 200 <= status < 300:
+                    break
+            # status code only — never URL query, never key
+            print("webhook to=%s count=%d status=%s" % (agent, len(uniq), status), flush=True)
+            NOTIFY_LAST[agent] = time.time()
+
 # ---- mailbox spool ----
 def _paths(agent):
     base = os.path.join(MAILBOX_DIR, agent)
@@ -116,6 +281,7 @@ def spool_save(agent, subj, env):
             pass
         if os.path.getsize(jl) > 2000000:
             spool_prune(agent)
+        notify_enqueue(agent, env)
     except OSError:
         pass
 
@@ -193,7 +359,6 @@ def touch_poll(agent):
 
 def spool_worker(agent, subj, url):
     """Durable sub; every envelope on subj lands in the agent spool."""
-    wait = 5
     while True:
         try:
             p = subprocess.Popen(["nats", "--server", url, "sub", "--raw", subj],
@@ -239,6 +404,7 @@ def start_spoolers():
                              args=(agent, "agents.broadcast", NATS_URL),
                              daemon=True)
         t.start()
+    threading.Thread(target=notifier, daemon=True).start()
     # periodic expiry prune
     def pruner():
         while True:
@@ -248,7 +414,7 @@ def start_spoolers():
     threading.Thread(target=pruner, daemon=True).start()
 
 class H(BaseHTTPRequestHandler):
-    server_version = "porch/2"
+    server_version = "porch/3"
     def log_message(self, *a):
         pass
     def _send(self, code, obj):
@@ -389,23 +555,28 @@ class H(BaseHTTPRequestHandler):
         if r.returncode != 0:
             return self._send(502, {"type": "error", "body": "lane publish failed"})
         # wait for the bridge reply on the agent's own inbox
-        deadline = time.time() + REPLY_TIMEOUT
-        while time.time() < deadline:
-            left = max(1, int(deadline - time.time()))
-            try:
-                r = run_nats(["sub", "--count=1", "agents.%s.inbox" % frm], url=uurl, timeout=min(left, 60) + 5)
-            except Exception:
-                continue
-            for line in (r.stdout or "").splitlines():
-                line = line.strip()
-                if not line.startswith("{"):
-                    continue
+        submit_mark_active(frm, sess)
+        try:
+            deadline = time.time() + REPLY_TIMEOUT
+            while time.time() < deadline:
+                left = max(1, int(deadline - time.time()))
                 try:
-                    rep = json.loads(line)
+                    r = run_nats(["sub", "--count=1", "agents.%s.inbox" % frm], url=uurl, timeout=min(left, 60) + 5)
                 except Exception:
                     continue
-                if rep.get("session") == sess and rep.get("from") == "hermes":
-                    return self._send(200, rep)
+                for line in (r.stdout or "").splitlines():
+                    line = line.strip()
+                    if not line.startswith("{"):
+                        continue
+                    try:
+                        rep = json.loads(line)
+                    except Exception:
+                        continue
+                    if rep.get("session") == sess and rep.get("from") == "hermes":
+                        submit_mark_done(frm, sess)
+                        return self._send(200, rep)
+        finally:
+            submit_mark_end(frm, sess)
         return self._send(504, {"from": "hermes", "to": frm, "session": sess, "type": "error", "body": "reply timeout — held, retry same session later"})
 
 if __name__ == "__main__":

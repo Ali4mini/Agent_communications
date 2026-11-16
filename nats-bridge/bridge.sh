@@ -167,7 +167,12 @@ sweep_holds() {
       continue
     fi
     if reappeared "$to"; then
-      if nats --server "$NATS_URL" pub "agents.$to.inbox" "$(cat "$f")" >/dev/null 2>&1; then
+      if payload=$(jq -c '. + {redelivered:true}' "$f" 2>/dev/null) && [ -n "$payload" ]; then
+        : # re-delivery marked so the porch webhook fires for it
+      else
+        payload=$(cat "$f")
+      fi
+      if nats --server "$NATS_URL" pub "agents.$to.inbox" "$payload" >/dev/null 2>&1; then
         echo "$(date -u +%FT%TZ) hold-delivered to=$to session=$session" >>"$INBOX/log"
         rm -f "$f"
       fi
